@@ -1,0 +1,363 @@
+{
+  "name": "Home Services AI Receptionist - Availability, Booking, Confirmations",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-home-services",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Vapi tool call",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "vapi-home-services",
+      "id": "b2e1d7c4-0001-4c3a-8f21-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vapi sends: { message: { type: 'tool-calls', toolCallList: [...], call: {...} } }\nconst msg = $input.first().json.body.message;\nconst toolCall = msg.toolCallList[0];\nconst args = typeof toolCall.function.arguments === 'string'\n  ? JSON.parse(toolCall.function.arguments)\n  : toolCall.function.arguments;\n\nreturn [{\n  json: {\n    tool: toolCall.function.name,\n    tool_call_id: toolCall.id,\n    caller_id: (msg.call && msg.call.customer && msg.call.customer.number) || '',\n    ...args\n  }\n}];"
+      },
+      "name": "Parse tool call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "id": "b2e1d7c4-0002-4c3a-8f21-000000000002"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tool }}",
+              "value2": "check_availability"
+            }
+          ]
+        }
+      },
+      "name": "Checking availability?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        440,
+        300
+      ],
+      "id": "b2e1d7c4-0003-4c3a-8f21-000000000003"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_CALENDAR_ID@group.calendar.google.com",
+          "mode": "id"
+        },
+        "returnAll": true,
+        "options": {
+          "timeMin": "={{ $json.date }}T00:00:00-05:00",
+          "timeMax": "={{ $json.date }}T23:59:59-05:00",
+          "singleEvents": true
+        }
+      },
+      "name": "Get booked jobs",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        160
+      ],
+      "alwaysOutputData": true,
+      "id": "b2e1d7c4-0004-4c3a-8f21-000000000004"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Business settings: edit for each client\nconst TZ_OFFSET = '-05:00';           // business time zone offset\nconst WINDOWS = [[8, 10], [10, 12], [12, 14], [14, 16], [16, 18]];\n\nconst req = $('Parse tool call').first().json;\nconst pad = n => String(n).padStart(2, '0');\nconst at = h => new Date(req.date + 'T' + pad(h) + ':00:00' + TZ_OFFSET).getTime();\n\nconst busy = $input.all()\n  .map(i => i.json)\n  .filter(e => e.start && e.end)\n  .map(e => [\n    new Date(e.start.dateTime || e.start.date).getTime(),\n    new Date(e.end.dateTime || e.end.date).getTime()\n  ]);\n\nconst now = Date.now();\nconst open = WINDOWS.filter(([s, e]) =>\n  at(s) > now && !busy.some(([bs, be]) => bs < at(e) && be > at(s))\n);\n\nconst label = h => (h % 12 || 12) + (h < 12 ? ' AM' : ' PM');\nconst result = open.length\n  ? 'Open arrival windows on ' + req.date + ': ' +\n    open.map(([s, e]) => label(s) + ' to ' + label(e) + ' (window_start ' + pad(s) + ':00)').join(', ') + '.'\n  : 'No open windows on ' + req.date + '. Offer to check the next day.';\n\nreturn [{ json: { tool_call_id: req.tool_call_id, result } }];"
+      },
+      "name": "Find open windows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        160
+      ],
+      "id": "b2e1d7c4-0005-4c3a-8f21-000000000005"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ results: [{ toolCallId: $json.tool_call_id, result: $json.result }] }) }}",
+        "options": {}
+      },
+      "name": "Reply with windows",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        160
+      ],
+      "id": "b2e1d7c4-0006-4c3a-8f21-000000000006"
+    },
+    {
+      "parameters": {
+        "jsCode": "const TZ_OFFSET = '-05:00';\nconst WINDOW_HOURS = 2;\n\nconst r = $input.first().json;\nconst [h, m] = r.window_start.split(':').map(Number);\nconst pad = n => String(n).padStart(2, '0');\nconst label = hr => (hr % 12 || 12) + (hr < 12 ? ' AM' : ' PM');\n\nreturn [{\n  json: {\n    job_id: 'JOB-' + Date.now().toString(36).toUpperCase(),\n    tool_call_id: r.tool_call_id,\n    booked_at: new Date().toISOString(),\n    customer_name: r.customer_name,\n    phone: r.phone,\n    caller_id: r.caller_id,\n    address: r.address,\n    zip: r.zip,\n    service_type: r.service_type,\n    issue: r.issue,\n    urgency: r.urgency,\n    date: r.date,\n    window: label(h) + ' to ' + label(h + WINDOW_HOURS),\n    start: r.date + 'T' + pad(h) + ':' + pad(m || 0) + ':00' + TZ_OFFSET,\n    end: r.date + 'T' + pad(h + WINDOW_HOURS) + ':' + pad(m || 0) + ':00' + TZ_OFFSET,\n    status: 'booked'\n  }\n}];"
+      },
+      "name": "Prepare booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        440
+      ],
+      "id": "b2e1d7c4-0007-4c3a-8f21-000000000007"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Jobs",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "name": "Log job to sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        440
+      ],
+      "id": "b2e1d7c4-0008-4c3a-8f21-000000000008"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "YOUR_CALENDAR_ID@group.calendar.google.com",
+          "mode": "id"
+        },
+        "start": "={{ $('Prepare booking').first().json.start }}",
+        "end": "={{ $('Prepare booking').first().json.end }}",
+        "additionalFields": {
+          "summary": "={{ ($('Prepare booking').first().json.urgency === 'emergency' ? '🚨 ' : '') + $('Prepare booking').first().json.service_type.replace('_', ' ').toUpperCase() + ' - ' + $('Prepare booking').first().json.customer_name }}",
+          "description": "={{ 'Job: ' + $('Prepare booking').first().json.job_id + '\\nIssue: ' + $('Prepare booking').first().json.issue + '\\nAddress: ' + $('Prepare booking').first().json.address + ' ' + $('Prepare booking').first().json.zip + '\\nPhone: ' + $('Prepare booking').first().json.phone }}",
+          "location": "={{ $('Prepare booking').first().json.address + ' ' + $('Prepare booking').first().json.zip }}"
+        }
+      },
+      "name": "Add to dispatch calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        440
+      ],
+      "id": "b2e1d7c4-0009-4c3a-8f21-000000000009"
+    },
+    {
+      "parameters": {
+        "from": "+10000000000",
+        "to": "={{ $('Prepare booking').first().json.phone }}",
+        "message": "={{ 'Hi ' + $('Prepare booking').first().json.customer_name.split(' ')[0] + ', your ' + $('Prepare booking').first().json.service_type.replace('_', ' ') + ' visit is booked for ' + $('Prepare booking').first().json.date + ', arrival ' + $('Prepare booking').first().json.window + '. Job #' + $('Prepare booking').first().json.job_id + '. Your technician will call 30 min before arriving. Reply STOP to opt out.' }}",
+        "options": {}
+      },
+      "name": "Text customer confirmation",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        340
+      ],
+      "id": "b2e1d7c4-0010-4c3a-8f21-000000000010"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ results: [{ toolCallId: $('Prepare booking').first().json.tool_call_id, result: 'Booked. Job number ' + $('Prepare booking').first().json.job_id + ', ' + $('Prepare booking').first().json.date + ', arrival ' + $('Prepare booking').first().json.window + '. A text confirmation is on its way.' }] }) }}",
+        "options": {}
+      },
+      "name": "Reply with booking",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        480
+      ],
+      "id": "b2e1d7c4-0011-4c3a-8f21-000000000011"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Prepare booking').first().json.urgency }}",
+              "value2": "emergency"
+            }
+          ]
+        }
+      },
+      "name": "Emergency?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        620
+      ],
+      "id": "b2e1d7c4-0012-4c3a-8f21-000000000012"
+    },
+    {
+      "parameters": {
+        "from": "+10000000000",
+        "to": "+10000000000",
+        "message": "={{ '🚨 EMERGENCY ' + $('Prepare booking').first().json.job_id + '\\n' + $('Prepare booking').first().json.service_type.toUpperCase() + ': ' + $('Prepare booking').first().json.issue + '\\n' + $('Prepare booking').first().json.address + ' ' + $('Prepare booking').first().json.zip + '\\n' + $('Prepare booking').first().json.customer_name + ' ' + $('Prepare booking').first().json.phone + '\\nWindow: ' + $('Prepare booking').first().json.date + ' ' + $('Prepare booking').first().json.window }}",
+        "options": {}
+      },
+      "name": "Alert on-call technician",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        600
+      ],
+      "id": "b2e1d7c4-0013-4c3a-8f21-000000000013"
+    }
+  ],
+  "connections": {
+    "Vapi tool call": {
+      "main": [
+        [
+          {
+            "node": "Parse tool call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse tool call": {
+      "main": [
+        [
+          {
+            "node": "Checking availability?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checking availability?": {
+      "main": [
+        [
+          {
+            "node": "Get booked jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get booked jobs": {
+      "main": [
+        [
+          {
+            "node": "Find open windows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find open windows": {
+      "main": [
+        [
+          {
+            "node": "Reply with windows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare booking": {
+      "main": [
+        [
+          {
+            "node": "Log job to sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log job to sheet": {
+      "main": [
+        [
+          {
+            "node": "Add to dispatch calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to dispatch calendar": {
+      "main": [
+        [
+          {
+            "node": "Text customer confirmation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reply with booking",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Emergency?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emergency?": {
+      "main": [
+        [
+          {
+            "node": "Alert on-call technician",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

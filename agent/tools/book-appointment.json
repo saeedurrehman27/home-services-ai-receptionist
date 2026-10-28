@@ -1,0 +1,35 @@
+{
+  "type": "function",
+  "function": {
+    "name": "book_appointment",
+    "description": "Book a technician visit in an open arrival window returned by check_availability. Returns a job number.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "customer_name": { "type": "string", "description": "Customer's full name" },
+        "phone": { "type": "string", "description": "Best callback number, confirmed by reading it back" },
+        "address": { "type": "string", "description": "Full service address" },
+        "zip": { "type": "string", "description": "ZIP code of the service address" },
+        "service_type": {
+          "type": "string",
+          "enum": ["plumbing", "heating", "cooling", "electrical", "water_heater", "drain", "other"]
+        },
+        "issue": { "type": "string", "description": "Short description of the problem" },
+        "urgency": {
+          "type": "string",
+          "enum": ["emergency", "standard"],
+          "description": "emergency = gas, flooding, sewage, sparking, no heat/cooling in extreme weather"
+        },
+        "date": { "type": "string", "description": "Appointment date, YYYY-MM-DD" },
+        "window_start": {
+          "type": "string",
+          "description": "Start of the chosen 2-hour arrival window, 24-hour HH:MM (for example 10:00)"
+        }
+      },
+      "required": ["customer_name", "phone", "address", "zip", "service_type", "issue", "urgency", "date", "window_start"]
+    }
+  },
+  "server": {
+    "url": "https://YOUR-N8N-HOST/webhook/vapi-home-services"
+  }
+}

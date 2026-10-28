@@ -1,0 +1,26 @@
+{
+  "name": "Home Services AI Receptionist",
+  "firstMessage": "Thanks for calling! This is Emma. How can I help you today?",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "temperature": 0.4,
+    "messages": [
+      { "role": "system", "content": "<paste agent/system-prompt.md here>" }
+    ],
+    "toolIds": [
+      "<id of check_availability tool>",
+      "<id of book_appointment tool>"
+    ]
+  },
+  "voice": {
+    "provider": "vapi",
+    "voiceId": "Emma"
+  },
+  "transcriber": {
+    "provider": "soniox",
+    "model": "stt-rt-v5"
+  },
+  "silenceTimeoutSeconds": 30,
+  "maxDurationSeconds": 600
+}

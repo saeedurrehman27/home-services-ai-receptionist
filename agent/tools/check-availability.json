@@ -1,0 +1,20 @@
+{
+  "type": "function",
+  "function": {
+    "name": "check_availability",
+    "description": "Get the open 2-hour technician arrival windows for a given date. Call this before offering any times.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "The date to check, in YYYY-MM-DD format"
+        }
+      },
+      "required": ["date"]
+    }
+  },
+  "server": {
+    "url": "https://YOUR-N8N-HOST/webhook/vapi-home-services"
+  }
+}
